@@ -36,7 +36,7 @@ def rotate_and_align(image):
 def split_image(image_path: str):
     image = cv2.imread(image_path)
     if image is None:
-        raise HTTPException(status_code=400, detail="Ошибка: не удалось загрузить изображение.")
+        raise HTTPException(status_code=400, detail=f"Ошибка: не удалось загрузить изображение {image_path}.")
     h, w = image.shape[:2]
     middle = w // 2
     left_half = image[:, :middle]
@@ -55,7 +55,7 @@ def process_images(image1_path: str, image2_path: str):
     img1 = cv2.imread(image1_path)
     img2 = cv2.imread(image2_path)
     if img1 is None or img2 is None:
-        raise HTTPException(status_code=400, detail="Ошибка: не удалось загрузить одно из изображений.")
+        raise HTTPException(status_code=400, detail=f"Ошибка: не удалось загрузить одно из изображений: {image1_path}, {image2_path}.")
     img1 = rotate_and_align(img1)
     img2 = rotate_and_align(img2)
     if img1.shape != img2.shape:
@@ -73,19 +73,21 @@ async def compare_images(file1: UploadFile = File(...), file2: UploadFile = File
     with file1_path.open("wb") as buffer:
         shutil.copyfileobj(file1.file, buffer)
     
+    file1_format = imghdr.what(str(file1_path))
     if file1.filename.lower().endswith(".pdf"):
         file1_path = Path(convert_pdf_to_image(str(file1_path)))
-    elif imghdr.what(str(file1_path)) not in ["jpeg", "png"]:
-        raise HTTPException(status_code=400, detail="Ошибка: неподдерживаемый формат файла.")
+    elif file1_format not in ["jpeg", "png"]:
+        raise HTTPException(status_code=400, detail=f"Ошибка: неподдерживаемый формат файла {file1.filename}. Ожидается PNG или JPG, но получен {file1_format}.")
     
     if file2:
         file2_path = UPLOAD_DIR / file2.filename
         with file2_path.open("wb") as buffer:
             shutil.copyfileobj(file2.file, buffer)
+        file2_format = imghdr.what(str(file2_path))
         if file2.filename.lower().endswith(".pdf"):
             file2_path = Path(convert_pdf_to_image(str(file2_path)))
-        elif imghdr.what(str(file2_path)) not in ["jpeg", "png"]:
-            raise HTTPException(status_code=400, detail="Ошибка: неподдерживаемый формат файла.")
+        elif file2_format not in ["jpeg", "png"]:
+            raise HTTPException(status_code=400, detail=f"Ошибка: неподдерживаемый формат файла {file2.filename}. Ожидается PNG или JPG, но получен {file2_format}.")
     else:
         left_path, right_path = split_image(str(file1_path))
         file1_path, file2_path = left_path, right_path
