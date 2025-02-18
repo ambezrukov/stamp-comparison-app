@@ -3,3 +3,5 @@ uvicorn
 opencv-python
 numpy
 python-multipart
+pdf2image
+poppler-utils
