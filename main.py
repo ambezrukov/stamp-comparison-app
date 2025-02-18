@@ -1,10 +1,20 @@
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File, UploadFile, HTTPException
 import cv2
 import numpy as np
 import shutil
 from pathlib import Path
 from fastapi.responses import FileResponse
 import uvicorn
+from pdf2image import convert_from_path
+import imghdr
+
+def convert_pdf_to_image(pdf_path: str):
+    images = convert_from_path(pdf_path)
+    if images:
+        image_path = pdf_path.replace(".pdf", ".png")
+        images[0].save(image_path, "PNG")
+        return image_path
+    raise HTTPException(status_code=400, detail="Ошибка: не удалось конвертировать PDF в изображение.")
 
 def rotate_and_align(image):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -25,12 +35,14 @@ def rotate_and_align(image):
 
 def split_image(image_path: str):
     image = cv2.imread(image_path)
+    if image is None:
+        raise HTTPException(status_code=400, detail="Ошибка: не удалось загрузить изображение.")
     h, w = image.shape[:2]
     middle = w // 2
     left_half = image[:, :middle]
     right_half = image[:, middle:]
-    left_path = image_path.replace(".png", "_left.png")
-    right_path = image_path.replace(".png", "_right.png")
+    left_path = image_path.replace(".png", "_left.png").replace(".jpg", "_left.jpg")
+    right_path = image_path.replace(".png", "_right.png").replace(".jpg", "_right.jpg")
     cv2.imwrite(left_path, left_half)
     cv2.imwrite(right_path, right_half)
     return left_path, right_path
@@ -42,6 +54,8 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 def process_images(image1_path: str, image2_path: str):
     img1 = cv2.imread(image1_path)
     img2 = cv2.imread(image2_path)
+    if img1 is None or img2 is None:
+        raise HTTPException(status_code=400, detail="Ошибка: не удалось загрузить одно из изображений.")
     img1 = rotate_and_align(img1)
     img2 = rotate_and_align(img2)
     if img1.shape != img2.shape:
@@ -58,13 +72,24 @@ async def compare_images(file1: UploadFile = File(...), file2: UploadFile = File
     file1_path = UPLOAD_DIR / file1.filename
     with file1_path.open("wb") as buffer:
         shutil.copyfileobj(file1.file, buffer)
+    
+    if file1.filename.lower().endswith(".pdf"):
+        file1_path = Path(convert_pdf_to_image(str(file1_path)))
+    elif imghdr.what(str(file1_path)) not in ["jpeg", "png"]:
+        raise HTTPException(status_code=400, detail="Ошибка: неподдерживаемый формат файла.")
+    
     if file2:
         file2_path = UPLOAD_DIR / file2.filename
         with file2_path.open("wb") as buffer:
             shutil.copyfileobj(file2.file, buffer)
+        if file2.filename.lower().endswith(".pdf"):
+            file2_path = Path(convert_pdf_to_image(str(file2_path)))
+        elif imghdr.what(str(file2_path)) not in ["jpeg", "png"]:
+            raise HTTPException(status_code=400, detail="Ошибка: неподдерживаемый формат файла.")
     else:
         left_path, right_path = split_image(str(file1_path))
         file1_path, file2_path = left_path, right_path
+    
     result_path = process_images(str(file1_path), str(file2_path))
     return FileResponse(result_path, media_type="image/png", filename="comparison_result.png")
 
